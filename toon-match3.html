@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>ぷるぷるマッチ3</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=M+PLUS+Rounded+1c:wght@800;900&display=swap">
+<style>
+:root{box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);
+--bg1:#bfe9ff;--bg2:#ffe6f3;--panel:#fffdf7;--ink:#2d2a4a;--btn:#ffb703;}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg1:#2a2f5e;--bg2:#4a2f5e;--panel:#4b4680;--ink:#f4f0ff;--btn:#ffb703;}}
+:root[data-theme="dark"]{--bg1:#2a2f5e;--bg2:#4a2f5e;--panel:#4b4680;--ink:#f4f0ff;--btn:#ffb703;}
+html{height:100%;scroll-padding-top:env(safe-area-inset-top,0px)}
+body{margin:0;height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;
+background:linear-gradient(160deg,var(--bg1),var(--bg2));color:var(--ink);
+font-family:"M PLUS Rounded 1c","Hiragino Maru Gothic ProN","Yu Gothic UI",system-ui,sans-serif;font-weight:800;user-select:none;-webkit-user-select:none}
+h1{margin:0;font-size:clamp(22px,5vw,32px);font-weight:900;letter-spacing:.04em}
+.stats{display:flex;gap:10px}
+.stat{background:var(--panel);border:3px solid #2d2a4a;border-radius:16px;box-shadow:0 4px 0 #2d2a4a;padding:4px 14px;min-width:78px;text-align:center;color:var(--ink)}
+.stat small{display:block;font-size:11px;opacity:.75}
+.stat b{font-size:22px;font-weight:900}
+#wrap{position:relative;background:var(--panel);border:4px solid #2d2a4a;border-radius:22px;box-shadow:0 6px 0 #2d2a4a;padding:6px}
+canvas{display:block;touch-action:none;border-radius:16px}
+#over{position:absolute;inset:0;display:none;flex-direction:column;align-items:center;justify-content:center;gap:10px;background:rgba(45,42,74,.72);border-radius:18px;color:#fff;text-align:center}
+#over.show{display:flex}
+#over h2{margin:0;font-size:30px;font-weight:900}
+button{font:inherit;font-weight:900;font-size:18px;color:#2d2a4a;background:var(--btn);border:3px solid #2d2a4a;border-radius:16px;box-shadow:0 5px 0 #2d2a4a;padding:8px 26px;cursor:pointer}
+button:active{transform:translateY(4px);box-shadow:0 1px 0 #2d2a4a}
+button:focus-visible{outline:3px solid #4dabf7;outline-offset:3px}
+.skills{display:flex;flex-wrap:wrap;gap:6px;justify-content:center;max-width:480px;padding:0 10px;font-size:12px}
+.who{align-self:center;font-weight:900}
+.chip{display:flex;align-items:center;gap:4px;background:var(--panel);border:2px solid #2d2a4a;border-radius:12px;padding:1px 8px 1px 2px;color:var(--ink);transition:transform .15s}
+.chip b{display:grid;place-items:center;width:20px;height:20px;border-radius:50%;background:var(--c);border:2px solid #2d2a4a;color:#2d2a4a;font-size:11px}
+.chip.on{transform:scale(1.18);box-shadow:0 0 0 3px var(--c)}
+.mini{font-size:20px;padding:4px 12px}
+</style>
+</head>
+<body>
+<h1>ぷるぷるマッチ3</h1>
+<div class="stats">
+  <div class="stat"><small>スコア</small><b id="sc">0</b></div>
+  <div class="stat"><small>のこり手数</small><b id="mv">25</b></div>
+  <div class="stat"><small>ベスト</small><b id="bs">0</b></div>
+  <button class="mini" id="mute" aria-label="音の切り替え">🔊</button>
+</div>
+<div class="skills" id="sk"></div>
+<div id="wrap">
+  <canvas id="cv" aria-label="マッチ3の盤面"></canvas>
+  <div id="over"><h2>おしまい！</h2><div id="fin"></div><button id="again">もう一度あそぶ</button></div>
+</div>
+<script>
+// ===== 見た目の設定：ここを差し替えれば絵柄が変わる =====
+const CFG={
+  ink:'#2d2a4a',
+  types:[
+    {c:'#ff6b6b',s:'circle'},{c:'#ffb703',s:'star'},{c:'#3ecf9a',s:'square'},
+    {c:'#4dabf7',s:'triangle'},{c:'#b388ff',s:'diamond'},{c:'#ff8fc7',s:'heart'}
+  ]
+};
+const N=8, MOVES=25;
+const cv=document.getElementById('cv'), ctx=cv.getContext('2d');
+let cell=52,W=0,dpr=1,grid=[],score=0,moves=MOVES,busy=true,sel=null,drag=null,shake=0,best=0;
+const parts=[],pops=[],fx=[];let sinceOrb=0;
+// ===== スキルとキャラクター：ここに足せば増やせる =====
+const line=(r,c,f)=>{const a=[];for(let i=0;i<N;i++)a.push(f(i));return a};
+const SK={
+  row:{n:'Flame Sweep',g:'横',c:'#ff6b6b',cells:(r,c)=>line(0,0,i=>[r,i])},
+  col:{n:'Thunder Slash',g:'縦',c:'#ffd43b',cells:(r,c)=>line(0,0,i=>[i,c])},
+  bomb:{n:'Grand Burst',g:'爆',c:'#ff922b',cells:(r,c)=>{const a=[];for(let i=r-2;i<=r+2;i++)for(let j=c-2;j<=c+2;j++)if(Math.abs(i-r)+Math.abs(j-c)<=3)a.push([i,j]);return a}},
+  color:{n:'Rainbow Magic',g:'彩',c:'#b388ff',cells:(r,c)=>{const t=grid[r][c].t,a=[];for(let i=0;i<N;i++)for(let j=0;j<N;j++)if(grid[i][j]&&grid[i][j].t===t)a.push([i,j]);return a}}
+};
+const CHARS=[{name:'ルナ',skills:['row','col','bomb','color']}];
+const chr=CHARS[0];
+document.getElementById('sk').innerHTML='<span class="who">'+chr.name+'</span>'+chr.skills.map(k=>'<span class="chip" id="chip-'+k+'" style="--c:'+SK[k].c+'"><b>'+SK[k].g+'</b>'+SK[k].n+'</span>').join('');
+function orbRoll(){
+  if(grid.flat().filter(p=>p&&p.k).length>=2)return undefined;
+  if(Math.random()<.015+sinceOrb*.012){sinceOrb=0;SFX.orb();return chr.skills[Math.random()*chr.skills.length|0]}
+}
+function fire(k,r,c){
+  SFX[k]();
+  fx.push({k,r,c,l:1,tg:k==='color'?SK[k].cells(r,c):null});
+  const el=document.getElementById('chip-'+k);if(el){el.classList.add('on');setTimeout(()=>el.classList.remove('on'),900)}
+}
+try{best=+localStorage.getItem('toon3best')||0}catch(e){}
+
+// ===== 効果音（Web Audioで合成。音声ファイルは不要） =====
+let AC=null,muted=false;
+try{muted=localStorage.getItem('toon3mute')==='1'}catch(e){}
+function ac(){if(!AC){try{AC=new(window.AudioContext||window.webkitAudioContext)()}catch(e){}}if(AC&&AC.state==='suspended')AC.resume();return AC}
+function tone(f,d,type='sine',v=.15,t0=0,f2){
+  if(muted)return;const a=ac();if(!a)return;const t=a.currentTime+t0,o=a.createOscillator(),g=a.createGain();
+  o.type=type;o.frequency.setValueAtTime(f,t);if(f2)o.frequency.exponentialRampToValueAtTime(f2,t+d);
+  g.gain.setValueAtTime(v,t);g.gain.exponentialRampToValueAtTime(.001,t+d);
+  o.connect(g).connect(a.destination);o.start(t);o.stop(t+d+.02);
+}
+function noise(d,v=.15,f0=2000,f1=200,t0=0){
+  if(muted)return;const a=ac();if(!a)return;const t=a.currentTime+t0,n=a.sampleRate*d|0,b=a.createBuffer(1,n,a.sampleRate),x=b.getChannelData(0);
+  for(let i=0;i<n;i++)x[i]=Math.random()*2-1;
+  const s=a.createBufferSource(),fl=a.createBiquadFilter(),g=a.createGain();
+  s.buffer=b;fl.type='lowpass';fl.frequency.setValueAtTime(f0,t);fl.frequency.exponentialRampToValueAtTime(f1,t+d);
+  g.gain.setValueAtTime(v,t);g.gain.exponentialRampToValueAtTime(.001,t+d);
+  s.connect(fl).connect(g).connect(a.destination);s.start(t);
+}
+const PENTA=[0,2,4,7,9];   // 明るく聞こえるペンタトニック
+const note=i=>261.63*Math.pow(2,(PENTA[i%5]+12*Math.floor(i/5))/12);
+const SFX={
+  tap:()=>tone(660,.07,'triangle',.12),
+  swap:()=>tone(420,.1,'sine',.1,0,620),
+  bad:()=>tone(180,.18,'square',.07,0,120),
+  match:c=>{const b=Math.min(c-1,6);[0,2,4].forEach((k,i)=>tone(note(b+k),.16,'triangle',.14,i*.05))},   // 連鎖するほど音が上がる
+  land:()=>tone(150,.06,'sine',.08,0,80),
+  orb:()=>{tone(1200,.2,'sine',.08);tone(1600,.25,'sine',.06,.08)},
+  row:()=>{noise(.5,.25,4000,300);tone(220,.4,'sawtooth',.1,0,660)},
+  col:()=>{tone(1400,.35,'sawtooth',.14,0,120);noise(.25,.15,6000,800)},
+  bomb:()=>{tone(140,.6,'sine',.35,0,35);noise(.6,.3,1500,80)},
+  color:()=>[0,1,2,3,4,5,6,7].forEach((k,i)=>tone(note(k+5),.22,'sine',.1,i*.05)),
+  shuffle:()=>noise(.4,.15,3000,400),
+  over:()=>[7,5,2,0].forEach((k,i)=>tone(note(k),.3,'triangle',.14,i*.16))
+};
+
+// ===== 形の定義 =====
+function poly(pts){ctx.beginPath();pts.forEach(([x,y],i)=>i?ctx.lineTo(x,y):ctx.moveTo(x,y));ctx.closePath()}
+const SHAPES={
+  circle:r=>{ctx.beginPath();ctx.arc(0,0,r,0,7)},
+  square:r=>poly([[-1,-1],[1,-1],[1,1],[-1,1]].map(([x,y])=>[x*r*.88,y*r*.88])),
+  diamond:r=>poly([[0,-r*1.1],[r*1.05,0],[0,r*1.1],[-r*1.05,0]]),
+  triangle:r=>poly([[0,-r*1.05],[r*1.05,r*.8],[-r*1.05,r*.8]]),
+  star:r=>poly(Array.from({length:10},(_,i)=>{const a=-Math.PI/2+i*Math.PI/5,d=i%2?r*.55:r*1.2;return[Math.cos(a)*d,Math.sin(a)*d]})),
+  heart:r=>{ctx.beginPath();ctx.moveTo(0,r*.95);ctx.bezierCurveTo(-r*1.5,-r*.1,-r*.7,-r*1.2,0,-r*.45);ctx.bezierCurveTo(r*.7,-r*1.2,r*1.5,-r*.1,0,r*.95);ctx.closePath()}
+};
+
+function drawPiece(p){
+  const T=CFG.types[p.t],r=cell*.34;
+  ctx.save();ctx.globalAlpha=Math.max(0,p.a);
+  ctx.translate((p.x+.5)*cell,(p.y+.5)*cell);
+  ctx.scale(p.s*p.sx,p.s*p.sy);
+  if(p.k){const g=ctx.createRadialGradient(0,0,r*.4,0,0,r*1.9),a=.55+.3*Math.sin(performance.now()/180);
+    g.addColorStop(0,'rgba(255,255,200,'+a+')');g.addColorStop(1,'rgba(255,255,200,0)');
+    ctx.fillStyle=g;ctx.beginPath();ctx.arc(0,0,r*1.9,0,7);ctx.fill()}
+  SHAPES[T.s](r);ctx.fillStyle=T.c;ctx.fill();
+  ctx.save();ctx.clip();                       // 右下のかげ（トゥーン影）
+  ctx.beginPath();ctx.rect(-r*2,-r*2,r*4,r*4);ctx.arc(-r*.3,-r*.3,r*1.15,0,7);
+  ctx.fillStyle='rgba(30,10,70,.2)';ctx.fill('evenodd');ctx.restore();
+  SHAPES[T.s](r);ctx.lineWidth=cell*.075;ctx.lineJoin='round';ctx.strokeStyle=CFG.ink;ctx.stroke();  // 太い輪郭
+  ctx.fillStyle='#fff';ctx.beginPath();ctx.ellipse(-r*.4,-r*.42,r*.2,r*.12,-.6,0,7);ctx.fill();          // ハイライト
+  if(p.k){ctx.fillStyle='#fff';ctx.beginPath();ctx.arc(0,r*.08,r*.58,0,7);ctx.fill();ctx.lineWidth=cell*.05;ctx.strokeStyle=SK[p.k].c;ctx.stroke();
+    ctx.fillStyle=CFG.ink;ctx.font='900 '+r*.8+'px "M PLUS Rounded 1c",sans-serif';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(SK[p.k].g,0,r*.12)}
+  ctx.restore();
+}
+
+// ===== アニメーション部品 =====
+const wait=ms=>new Promise(r=>setTimeout(r,ms));
+function tween(ms,fn){return new Promise(res=>{const t0=performance.now();(function f(){const p=Math.min(1,(performance.now()-t0)/ms);fn(p);p<1?requestAnimationFrame(f):res()})()})}
+const easeIO=p=>p<.5?2*p*p:1-2*(1-p)*(1-p);
+const easeBack=p=>{const c=1.7;return 1+(c+1)*Math.pow(p-1,3)+c*Math.pow(p-1,2)};
+function burst(x,y,c){for(let i=0;i<9;i++){const a=Math.random()*6.28,v=1.5+Math.random()*3;parts.push({x:(x+.5)*cell,y:(y+.5)*cell,vx:Math.cos(a)*v,vy:Math.sin(a)*v-1.5,l:1,c,z:cell*(.05+Math.random()*.06)})}}
+function pop(x,y,t,z=1){pops.push({x:(x+.5)*cell,y:(y+.5)*cell,t,l:1,z})}
+
+// ===== 盤面ロジック（見た目に依存しない） =====
+const mk=(t,x,y,k)=>({t,x,y,s:1,sx:1,sy:1,a:1,k});
+const rnd=()=>Math.random()*CFG.types.length|0;
+const sw=(r,c,r2,c2)=>{[grid[r][c],grid[r2][c2]]=[grid[r2][c2],grid[r][c]]};
+function find(){
+  const s=new Set();
+  for(let r=0;r<N;r++)for(let c=0;c<N;c++){const p=grid[r][c];if(!p)continue;
+    for(const[dr,dc]of[[0,1],[1,0]]){let k=1;
+      while(r+dr*k<N&&c+dc*k<N&&grid[r+dr*k][c+dc*k]&&grid[r+dr*k][c+dc*k].t===p.t)k++;
+      if(k>=3)for(let i=0;i<k;i++)s.add(grid[r+dr*i][c+dc*i]);}}
+  return s;
+}
+function hasMove(){
+  for(let r=0;r<N;r++)for(let c=0;c<N;c++)for(const[dr,dc]of[[0,1],[1,0]]){
+    const r2=r+dr,c2=c+dc;if(r2>=N||c2>=N)continue;
+    sw(r,c,r2,c2);const ok=find().size>0;sw(r,c,r2,c2);if(ok)return true}
+  return false;
+}
+function newBoard(){
+  do{grid=[];for(let r=0;r<N;r++){grid[r]=[];for(let c=0;c<N;c++){let t;
+    do t=rnd();while((c>1&&grid[r][c-1].t===t&&grid[r][c-2].t===t)||(r>1&&grid[r-1][c].t===t&&grid[r-2][c].t===t));
+    grid[r][c]=mk(t,c,r)}}}while(!hasMove());
+  sinceOrb=0;grid[Math.random()*N|0][Math.random()*N|0].k=chr.skills[Math.random()*chr.skills.length|0];
+}
+async function intro(){
+  grid.flat().forEach(p=>p.s=0);
+  await tween(450,q=>grid.flat().forEach(p=>{p.s=Math.max(0,easeBack(Math.min(1,Math.max(0,q*1.3-(p.x+p.y)*.03))))}));
+  grid.flat().forEach(p=>p.s=1);
+}
+
+async function swapAnim(a,b){
+  const ax=a.x,ay=a.y,bx=b.x,by=b.y;
+  await tween(190,p=>{const e=easeIO(p);a.x=ax+(bx-ax)*e;a.y=ay+(by-ay)*e;b.x=bx+(ax-bx)*e;b.y=by+(ay-by)*e;
+    const q=Math.sin(p*Math.PI)*.14;a.sx=b.sx=1+q;a.sy=b.sy=1-q});
+  a.sx=a.sy=b.sx=b.sy=1;
+}
+async function fall(){
+  const info=[];
+  for(let c=0;c<N;c++){
+    let w=N-1;
+    for(let r=N-1;r>=0;r--){const p=grid[r][c];if(p){if(r!==w){grid[w][c]=p;grid[r][c]=null;info.push({p,y0:p.y,y1:w})}w--}}
+    for(let r=w;r>=0;r--){const p=mk(rnd(),c,r-(w+1),orbRoll());grid[r][c]=p;info.push({p,y0:p.y,y1:r})}
+  }
+  info.forEach(i=>i.d=130+Math.abs(i.y1-i.y0)*60);
+  const total=Math.max(...info.map(i=>i.d));
+  await tween(total,q=>{const t=q*total;info.forEach(i=>{
+    const u=Math.min(1,t/i.d),e=1-(1-u)*(1-u);i.p.y=i.y0+(i.y1-i.y0)*e;
+    const k=Math.max(0,(u-.8)/.2),s=Math.sin(k*Math.PI)*.17;i.p.sx=1+s;i.p.sy=1-s})});   // 着地でぷるん
+  info.forEach(i=>{i.p.y=i.y1;i.p.sx=i.p.sy=1});SFX.land();
+}
+async function resolve(){
+  let m,combo=0;
+  while((m=find()).size){
+    combo++;SFX.match(combo);
+    const items=new Map(),done=new Set(),q=[];
+    m.forEach(p=>{items.set(p,0);if(p.k)q.push(p)});
+    let fired=0,first=null;
+    while(q.length){                                   // 玉が発動 → 範囲内の玉も連鎖して発動
+      const o=q.pop();if(done.has(o))continue;done.add(o);fired++;first=first||o.k;
+      const r0=Math.round(o.y),c0=Math.round(o.x),d0=items.get(o);
+      setTimeout(()=>fire(o.k,r0,c0),d0);
+      SK[o.k].cells(r0,c0).forEach(([i,j])=>{
+        if(i<0||j<0||i>=N||j>=N||!grid[i][j])return;
+        const t=grid[i][j],dl=d0+Math.hypot(i-r0,j-c0)*45+80;   // 玉から遠いほど遅れて消える
+        if(!items.has(t)||items.get(t)>dl)items.set(t,dl);
+        if(t.k&&!done.has(t))q.push(t)});
+    }
+    const n=items.size,gain=(n*10+Math.max(0,n-3)*10)*combo+fired*100;score+=gain;
+    let cx=0,cy=0;m.forEach(p=>{cx+=p.x;cy+=p.y});
+    pop(cx/m.size,cy/m.size,'+'+gain+(combo>1?' ×'+combo:''));
+    if(fired){pop(3.5,3.5,SK[first].n+'!',1.7);shake=14}else if(combo>1)shake=Math.min(12,combo*4);
+    updateUI();
+    const arr=[...items],tot=240+Math.max(...arr.map(a=>a[1]));
+    arr.forEach(([p])=>p._b=0);
+    await tween(tot,tt=>{const t=tt*tot;arr.forEach(([p,d])=>{const u=Math.min(1,Math.max(0,(t-d)/240));
+      if(u>0&&!p._b){p._b=1;burst(p.x,p.y,CFG.types[p.t].c)}
+      if(u>0){p.s=u<.3?1+u*.6:1.18*(1-(u-.3)/.7);p.a=1-Math.max(0,(u-.6)/.4)}})});
+    for(let r=0;r<N;r++)for(let c=0;c<N;c++)if(items.has(grid[r][c]))grid[r][c]=null;
+    await fall();
+  }
+}
+async function attempt(r,c,r2,c2){
+  if(busy)return;busy=true;clearSel();
+  const a=grid[r][c],b=grid[r2][c2];
+  SFX.swap();sw(r,c,r2,c2);await swapAnim(a,b);
+  if(!find().size){sw(r,c,r2,c2);await swapAnim(a,b);SFX.bad();shake=4;busy=false;return}   // 揃わなければ戻す
+  moves--;sinceOrb++;updateUI();
+  await resolve();
+  if(moves<=0){finish();return}
+  if(!hasMove()){pop(3.5,3.5,'シャッフル！');SFX.shuffle();await wait(500);newBoard();await intro()}
+  busy=false;
+}
+function finish(){
+  SFX.over();
+  if(score>best){best=score;try{localStorage.setItem('toon3best',best)}catch(e){}}
+  updateUI();document.getElementById('fin').textContent='スコア '+score;
+  document.getElementById('over').classList.add('show');
+}
+async function start(){
+  busy=true;score=0;moves=MOVES;document.getElementById('over').classList.remove('show');
+  newBoard();updateUI();await intro();busy=false;
+}
+function updateUI(){sc.textContent=score;mv.textContent=moves;bs.textContent=Math.max(best,score)}
+
+// ===== 入力（タップ・ドラッグ両対応） =====
+function cellAt(e){const b=cv.getBoundingClientRect();
+  return[Math.min(N-1,Math.max(0,Math.floor((e.clientY-b.top)/cell))),Math.min(N-1,Math.max(0,Math.floor((e.clientX-b.left)/cell)))]}
+function clearSel(){if(sel&&grid[sel.r]&&grid[sel.r][sel.c])grid[sel.r][sel.c].s=1;sel=null}
+cv.addEventListener('pointerdown',e=>{
+  if(busy)return;const[r,c]=cellAt(e);
+  if(sel&&Math.abs(sel.r-r)+Math.abs(sel.c-c)===1){const s=sel;attempt(s.r,s.c,r,c);return}
+  if(sel&&sel.r===r&&sel.c===c){clearSel();return}
+  clearSel();sel={r,c};grid[r][c].s=1.14;SFX.tap();drag={x:e.clientX,y:e.clientY,r,c};
+});
+cv.addEventListener('pointermove',e=>{
+  if(!drag||busy)return;const dx=e.clientX-drag.x,dy=e.clientY-drag.y;
+  if(Math.max(Math.abs(dx),Math.abs(dy))<cell*.4)return;
+  const h=Math.abs(dx)>Math.abs(dy),r2=drag.r+(h?0:Math.sign(dy)),c2=drag.c+(h?Math.sign(dx):0),d=drag;drag=null;
+  if(r2>=0&&r2<N&&c2>=0&&c2<N)attempt(d.r,d.c,r2,c2);
+});
+addEventListener('pointerup',()=>drag=null);
+document.getElementById('again').onclick=start;
+const mb=document.getElementById('mute');mb.textContent=muted?'🔇':'🔊';
+mb.onclick=()=>{muted=!muted;mb.textContent=muted?'🔇':'🔊';try{localStorage.setItem('toon3mute',muted?'1':'0')}catch(e){}SFX.tap()};
+
+// ===== 描画ループ =====
+function frame(){
+  ctx.setTransform(dpr,0,0,dpr,0,0);ctx.clearRect(0,0,W,W);
+  if(shake>.3){ctx.translate((Math.random()-.5)*shake,(Math.random()-.5)*shake);shake*=.88}
+  for(let r=0;r<N;r++)for(let c=0;c<N;c++){ctx.fillStyle=(r+c)%2?'rgba(140,120,220,.16)':'rgba(140,120,220,.06)';ctx.fillRect(c*cell,r*cell,cell,cell)}
+  grid.flat().forEach(p=>p&&drawPiece(p));
+  for(let i=parts.length-1;i>=0;i--){const p=parts[i];p.x+=p.vx;p.y+=p.vy;p.vy+=.16;p.l-=.03;
+    if(p.l<=0){parts.splice(i,1);continue}
+    ctx.globalAlpha=p.l;ctx.beginPath();ctx.arc(p.x,p.y,p.z*p.l+1,0,7);ctx.fillStyle=p.c;ctx.fill();
+    ctx.lineWidth=2;ctx.strokeStyle=CFG.ink;ctx.stroke();ctx.globalAlpha=1}
+  for(let i=fx.length-1;i>=0;i--){const f=fx[i],col=SK[f.k].c;f.l-=.03;
+    if(f.l<=0){fx.splice(i,1);continue}
+    const x=(f.c+.5)*cell,y=(f.r+.5)*cell,th=cell*.95*f.l;
+    ctx.save();ctx.globalAlpha=Math.min(1,f.l*1.6);ctx.fillStyle=ctx.strokeStyle=col;ctx.lineCap='round';
+    if(f.k==='row'){ctx.fillRect(0,y-th/2,W,th);ctx.fillStyle='#fff';ctx.fillRect(0,y-th/4,W,th/2)}
+    else if(f.k==='col'){ctx.fillRect(x-th/2,0,th,W);ctx.fillStyle='#fff';ctx.fillRect(x-th/4,0,th/2,W)}
+    else if(f.k==='bomb'){const R=cell*(.5+(1-f.l)*3.6);ctx.lineWidth=cell*.6*f.l;ctx.beginPath();ctx.arc(x,y,R,0,7);ctx.stroke();ctx.strokeStyle='#fff';ctx.lineWidth=cell*.25*f.l;ctx.stroke()}
+    else f.tg.forEach(([i2,j2])=>{ctx.strokeStyle=col;ctx.lineWidth=cell*.2*f.l;ctx.beginPath();ctx.moveTo(x,y);ctx.lineTo((j2+.5)*cell,(i2+.5)*cell);ctx.stroke();ctx.strokeStyle='#fff';ctx.lineWidth=cell*.07*f.l;ctx.stroke()});
+    ctx.restore()}
+  ctx.textAlign='center';ctx.lineJoin='round';
+  for(let i=pops.length-1;i>=0;i--){const p=pops[i];p.l-=.02;p.y-=.7;
+    if(p.l<=0){pops.splice(i,1);continue}
+    ctx.font='900 '+cell*.36*p.z+'px "M PLUS Rounded 1c",sans-serif';ctx.globalAlpha=Math.min(1,p.l*2);ctx.lineWidth=cell*.1;ctx.strokeStyle=CFG.ink;ctx.strokeText(p.t,p.x,p.y);ctx.fillStyle='#fff';ctx.fillText(p.t,p.x,p.y);ctx.globalAlpha=1}
+  requestAnimationFrame(frame);
+}
+function resize(){
+  const s=Math.min(innerWidth-40,innerHeight-280,480);
+  cell=Math.floor(Math.max(s,240)/N);W=cell*N;dpr=devicePixelRatio||1;
+  cv.width=W*dpr;cv.height=W*dpr;cv.style.width=cv.style.height=W+'px';
+}
+addEventListener('resize',resize);
+resize();frame();start();
+</script>
+</body>
+</html>
